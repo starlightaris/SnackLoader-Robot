@@ -122,7 +122,26 @@ if __name__ == "__main__":
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
         # Check condition: Object detected AND distance == 50cm
-        object_detected = len(objectInfo) > 0
+        
+        # Find closest object (biggest bounding box)
+        biggest_box = None
+        max_area = 0
+        object_detected = False
+
+        for box, className in objectInfo:
+            area = box[2] * box[3]  # width * height
+            if area > max_area:
+                max_area = area
+                biggest_box = box
+                object_detected = True
+
+        # Optional: You can also draw the biggest box differently to highlight it
+        if biggest_box is not None:
+            # Highlight the closest object with a different color
+            x, y, w, h = biggest_box
+            cv2.rectangle(img, (x, y), (x+w, y+h), (255, 0, 0), 3)  # Blue box for closest
+            cv2.putText(img, "CLOSEST", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+    
         current_time = time.time()
         
         if object_detected and distance <= 30:
