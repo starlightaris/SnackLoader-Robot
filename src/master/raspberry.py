@@ -3,13 +3,13 @@ import cv2
 
 # Load class names
 classNames = []
-classFile = "/home/eutech/Desktop/pet-feeder/Object_Detection_Files/coco.names"
+classFile = "/home/eutech/Desktop/SnackLoader-Robot/Object_Detection_Files/coco.names"
 with open(classFile, "rt") as f:
     classNames = f.read().rstrip("\n").split("\n")
 
 # Load model config and weights
-configPath = "/home/eutech/Desktop/pet-feeder/Object_Detection_Files/ssd_mobilenet_v3_large_coco_2020_01_14.pbtxt"
-weightsPath = "/home/eutech/Desktop/pet-feeder/Object_Detection_Files/frozen_inference_graph.pb"
+configPath = "/home/eutech/Desktop/SnackLoader-Robot/Object_Detection_Files/ssd_mobilenet_v3_large_coco_2020_01_14.pbtxt"
+weightsPath = "/home/eutech/Desktop/SnackLoader-Robot/Object_Detection_Files/frozen_inference_graph.pb"
 
 # Initialize detection model
 net = cv2.dnn_DetectionModel(weightsPath, configPath)
@@ -67,7 +67,7 @@ if __name__ == "__main__":
             break
 
         # Detect objects and mark centers of their bounding boxes
-        result, objectInfo = getObjects(img, 0.45, 0.2, objects=['cat', 'dog'])
+        result, objectInfo = getObjects(img, 0.45, 0.2, objects=['bottle']) #CHANGE OBJECT HERE
 
         cv2.imshow("Output", img)
         if cv2.waitKey(1) & 0xFF == ord('q'):
