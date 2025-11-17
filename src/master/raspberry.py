@@ -1,5 +1,7 @@
-#Import OpenCV
 import cv2
+import serial
+import time
+import threading
 
 # Load class names
 classNames = []
@@ -17,6 +19,19 @@ net.setInputSize(320, 320)
 net.setInputScale(1.0 / 127.5)
 net.setInputMean((127.5, 127.5, 127.5))
 net.setInputSwapRB(True)
+
+# Initialize serial connection to Arduino
+try:
+    arduino = serial.Serial('/dev/ttyACM0', 9600, timeout=1)
+    time.sleep(2)
+    print("Connected to Arduino 2")
+except Exception as e:
+    print(f"Failed to connect to Arduino: {e}")
+    arduino = None
+
+# Global variable for distance
+current_distance = 0
+distance_lock = threading.Lock()
 
 # Function to detect objects and mark centers
 def getObjects(img, thres, nms, draw=True, objects=[]):
@@ -49,8 +64,32 @@ def getObjects(img, thres, nms, draw=True, objects=[]):
 
     return img, objectInfo
 
+# Function to read distance from Arduino thru Ultrasonic
+def read_ultrasonic():
+    """Thread to continuously read distance from Arduino"""
+    global current_distance
+    while True:
+        try:
+            if arduino and arduino.in_waiting > 0:
+                line = arduino.readline().decode('utf-8').rstrip()
+                try:
+                    dist = int(line)
+                    with distance_lock:
+                        current_distance = dist
+                except ValueError:
+                    pass  # Ignore non-integer lines
+        except Exception as e:
+            print(f"Ultrasonic read error: {e}")
+        time.sleep(0.1)
+
 # Main program
 if __name__ == "__main__":
+    # Ultrasonic reading thread
+    ultrasonic_thread = threading.Thread(target=read_ultrasonic)
+    ultrasonic_thread.daemon = True
+    ultrasonic_thread.start()
+    
+    # Video Capture
     cap = cv2.VideoCapture(0)
     cap.set(3, 640)
     cap.set(4, 480)
@@ -59,16 +98,55 @@ if __name__ == "__main__":
     frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     print(f"Video feed size: {frame_width}x{frame_height}")
+    
+    # Variables for condition tracking
+    condition_met = False
+    last_trigger_time = 0
+    trigger_cooldown = 3  # seconds
 
     while True:
         success, img = cap.read()
         if not success:
             print("Failed to read from camera.")
             break
+        
+        # Get current distance
+        with distance_lock:
+            distance = current_distance
 
         # Detect objects and mark centers of their bounding boxes
         result, objectInfo = getObjects(img, 0.45, 0.2, objects=['bottle']) #CHANGE OBJECT HERE
 
+        # Display distance on screen
+        cv2.putText(img, f"Distance: {distance}cm", (10, 30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+        # Check condition: Object detected AND distance == 50cm
+        object_detected = len(objectInfo) > 0
+        current_time = time.time()
+        
+        if object_detected and distance <= 30:
+            # Only trigger if cooldown has passed
+            if current_time - last_trigger_time > trigger_cooldown:
+                condition_met = True
+                last_trigger_time = current_time
+                print(f"Object detected at {distance} cm")
+                time.sleep(3)
+            else:
+                condition_met = False  # Still in cooldown
+        else:
+            condition_met = False
+        
+        # Display status on screen
+        status_text = "CONDITION MET!" if condition_met else "Monitoring..."
+        status_color = (0, 255, 0) if condition_met else (255, 255, 255)
+        
+        cv2.putText(img, f"Status: {status_text}", (10, 60), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
+        
+        cv2.putText(img, f"Objects detected: {len(objectInfo)}", (10, 90), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                
         cv2.imshow("Output", img)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break

@@ -17,7 +17,16 @@ void loop() {
   int dist = getDistance();
   
   Serial.println(dist);
-  delay(500);
+  
+  if (Serial.available()) {
+    String command = Serial.readStringUntil('\n');
+    command.trim();
+    
+    if (command == "TRIGGER") {
+      Serial.println("ACTION_TRIGGERED");
+    }
+  }
+  delay(200);
 }
 
 int getDistance() {
