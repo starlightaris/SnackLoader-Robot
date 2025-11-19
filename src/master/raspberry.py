@@ -3,7 +3,7 @@ import time
 import serial
 
 # Arduino Serial
-arduino = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
+arduino = serial.Serial('/dev/ttyACM0', 9600, timeout=1)
 time.sleep(2)
 
 def send_to_arduino(msg):
