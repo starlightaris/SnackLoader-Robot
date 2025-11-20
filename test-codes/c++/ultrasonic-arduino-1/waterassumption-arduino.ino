@@ -16,7 +16,7 @@
 // WiFi / MQTT
 const char* ssid = " test@gmail.com";
 const char* password = "test123";
-const char* mqtt_server = "broker.hivemq.com"; // example public broker
+
 
 HX711 scale;
 WiFiClient espClient;
