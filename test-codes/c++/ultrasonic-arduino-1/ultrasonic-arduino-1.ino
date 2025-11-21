@@ -4,7 +4,11 @@ const int TRIG = 6;
 const int ECHO = 7;
 
 void setup() {
+<<<<<<< HEAD
   Serial.begin(9600);//test//test//test
+=======
+  Serial.begin(9600);//test
+>>>>>>> dad7dd29a5ebb4b2ec19412efc704e7b41c351ac
   pinMode(TRIG, OUTPUT);
   pinMode(ECHO, INPUT);
   digitalWrite(TRIG, LOW);
