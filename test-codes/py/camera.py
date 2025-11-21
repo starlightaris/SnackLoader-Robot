@@ -67,7 +67,7 @@ if __name__ == "__main__":
             break
 
         # Detect objects and mark centers of their bounding boxes
-        result, objectInfo = getObjects(img, 0.45, 0.2, objects=['cat', 'dog'])
+        result, objectInfo = getObjects(img, 0.45, 0.2, objects=['cat', 'dog']) #CHANGE OBJ HERE
 
         cv2.imshow("Output", img)
         if cv2.waitKey(1) & 0xFF == ord('q'):
