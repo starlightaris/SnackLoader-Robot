@@ -6,7 +6,7 @@ from firebase_admin import credentials, db
 # ---------------------
 # Firebase Setup
 # ---------------------
-cred = credentials.Certificate("/home/pi/firebase-service-account.json")
+cred = credentials.Certificate("/home/eutech/serviceAccountKey.json")
 firebase_admin.initialize_app(cred, {
     'databaseURL' : "https://snackloader-default-rtdb.asia-southeast1.firebasedatabase.app/"
 })
