@@ -36,7 +36,7 @@ void loop() {
 
   
   Serial.print(weightGrams, 1);
-  Serial.println(" g");
+  Serial.println(" CAT");
 
   delay(50);
 }
