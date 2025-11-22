@@ -83,7 +83,7 @@ if __name__ == "__main__":
     cap.set(3, 640)
     cap.set(4, 480)
 
-    print("🎥 Camera started. Press 'Q' to quit.")
+    print("Camera started. Press 'Q' to quit.")
 
     while True:
         success, img = cap.read()
