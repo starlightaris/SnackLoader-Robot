@@ -42,7 +42,7 @@ def send_detection_to_firebase(object_name, confidence):
         "timestamp": timestamp
     })
 
-    print(f"🔥 Sent to Firebase → {object_name}: {safe_confidence}% at {timestamp}")
+    print(f"Sent to Firebase → {object_name}: {safe_confidence}% at {timestamp}")
 
 # --------------------- OBJECT DETECTION ---------------------
 def getObjects(img, thres, nms, draw=True, objects=[]):
