@@ -1,10 +1,9 @@
- #include "HX711.h"
+#include "HX711.h"
 
-#define DT 2   
-#define SCK 3  
+#define DT 2
+#define SCK 3
 
 HX711 scale;
-
 
 float calibration_factor = 411936.0;
 
@@ -18,23 +17,21 @@ void setup() {
   Serial.println("Make sure NO weight is on the scale...");
   delay(1500);
 
-  scale.tare();   
+  scale.tare();
 
-  Serial.println("Scale ready.");
+  Serial.println("Dog Scale ready.");
 }
 
 void loop() {
-  
+
   float weightKg = scale.get_units(10);
 
   if (weightKg < 0) weightKg = 0;
 
-  
   float weightGrams = weightKg * 1000.0;
 
-  
-  Serial.print(weightGrams, 1);   
-  Serial.println(" DOG");
+  // CLEAN NUMERIC OUTPUT (important)
+  Serial.println(weightGrams, 1);
 
   delay(30);
 }
