@@ -1,30 +1,44 @@
 import serial
+import time
 import firebase_admin
-from firebase_admin import credentials, firestore
+from firebase_admin import credentials, db
 
-# -------------------- Firebase Setup -------------------------
-cred = credentials.Certificate("/home/eutech/serviceAccountKey.json")
-firebase_admin.initialize_app(cred)
+# ---------------------
+# Firebase Setup
+# ---------------------
+cred = credentials.Certificate("/home/pi/firebase-service-account.json")
+firebase_admin.initialize_app(cred, {
+    'databaseURL' : "https://snackloader-default-rtdb.asia-southeast1.firebasedatabase.app/"
+})
 
-db = firestore.client()
-cat_ref = db.collection("feeder").document("bowlWeights")
+rtdb_ref = db.reference("/petfeeder/cat")
 
-# -------------------- Serial Setup (your port) ----------------
-cat_port = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
+# ---------------------
+# Arduino Setup
+# ---------------------
+arduino = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
+time.sleep(2)
+print("Connected to Arduino CAT feeder")
 
-print("Listening for CAT bowl weight on /dev/ttyUSB0...")
-
+# ---------------------
+# Read Loop
+# ---------------------
 while True:
     try:
-        line = cat_port.readline().decode().strip()
+        line = arduino.readline().decode().strip()
 
-        if "CAT" in line:
-            weight_val = float(line.split()[0])
-            print("Cat Weight:", weight_val, "kg")
+        if line.startswith("WEIGHT:"):
+            weight = float(line.split(":")[1])
 
-            cat_ref.set({
-                "catWeight": weight_val
-            }, merge=True)
+            print("Cat Weight:", weight)
+
+            # update realtime database
+            rtdb_ref.update({
+                "bowlWeight": weight,
+                "timestamp": time.time()
+            })
 
     except Exception as e:
         print("Error:", e)
+
+    time.sleep(0.05)
