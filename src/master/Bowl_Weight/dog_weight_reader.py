@@ -2,7 +2,7 @@ import serial
 import time
 
 class DogWeightReader:
-    def __init__(self, port="/dev/ttyUSB1", baud=9600):
+    def __init__(self, port="/dev/ttyUSB0", baud=9600):
         self.serial = serial.Serial(port, baud, timeout=1)
         time.sleep(2)
 
