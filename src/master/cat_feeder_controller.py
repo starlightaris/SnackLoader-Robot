@@ -10,7 +10,7 @@ from firebase_admin import credentials, db
 SERVICE_ACCOUNT = "/home/eutech/serviceAccountKey.json"
 RTDB_URL = "https://snackloader-default-rtdb.asia-southeast1.firebasedatabase.app/"
 
-PORT = "/dev/ttyUSB2"   # << CHANGE THIS TO YOUR PORT
+PORT = "/dev/ttyUSB0"   # << CHANGE THIS TO YOUR PORT
 BAUD = 9600
 
 POLL_INTERVAL = 0.2
