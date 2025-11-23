@@ -8,10 +8,10 @@ from firebase_admin import credentials, db
 SERVICE_ACCOUNT = "/home/eutech/serviceAccountKey.json"
 RTDB_URL = "https://snackloader-default-rtdb.asia-southeast1.firebasedatabase.app"
 
-ARDUINO_PORT = "/dev/ttyUSB1"   # update if needed
+ARDUINO_PORT = "/dev/ttyUSB0"   # update if needed
 BAUD = 9600
 
-GRACE_PERIOD_AFTER_DONE = 60     # cat stays → extend open
+GRACE_PERIOD_AFTER_DONE = 10     # cat stays → extend open
 POLL_INTERVAL = 0.25
 
 # ---------------------------------------------------------
