@@ -6,7 +6,7 @@ from firebase_admin import credentials, db
 SERVICE_ACCOUNT = "/home/eutech/serviceAccountKey.json"
 RTDB_URL = "https://snackloader-default-rtdb.asia-southeast1.firebasedatabase.app"
 
-ARDUINO_PORT = "/dev/ttyUSB0"   # change if needed
+ARDUINO_PORT = "/dev/ttyUSB1"   # change if needed
 BAUD = 9600
 
 GRACE_PERIOD_AFTER_DONE = 60.0  
