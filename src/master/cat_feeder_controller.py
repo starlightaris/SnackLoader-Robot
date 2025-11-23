@@ -1,5 +1,6 @@
-# fixed_controller.py
-import serial, time, threading
+import serial
+import time
+import threading
 import firebase_admin
 from firebase_admin import credentials, db
 
@@ -7,221 +8,135 @@ from firebase_admin import credentials, db
 # CONFIG
 # ---------------------------------------------------------
 SERVICE_ACCOUNT = "/home/eutech/serviceAccountKey.json"
-RTDB_URL = "https://snackloader-default-rtdb.asia-southeast1.firebasedatabase.app"
+RTDB_URL = "https://snackloader-default-rtdb.asia-southeast1.firebasedatabase.app/"
 
-ARDUINO_PORT = "/dev/ttyUSB1"   # update if needed
+PORT = "/dev/ttyUSB1"   # << CHANGE THIS TO YOUR PORT
 BAUD = 9600
 
-GRACE_PERIOD_AFTER_DONE = 10     # cat stays → extend open
-POLL_INTERVAL = 0.25
-
-OPEN_ACK_TIMEOUT = 3.0  # seconds to wait for OPEN_LID ack
+POLL_INTERVAL = 0.2
 
 # ---------------------------------------------------------
-# INIT FIREBASE
+# INIT
 # ---------------------------------------------------------
 cred = credentials.Certificate(SERVICE_ACCOUNT)
 firebase_admin.initialize_app(cred, {"databaseURL": RTDB_URL})
 
-# ---------------------------------------------------------
-# SERIAL
-# ---------------------------------------------------------
-ser = serial.Serial(ARDUINO_PORT, BAUD, timeout=1)
+ser = serial.Serial(PORT, BAUD, timeout=1)
 time.sleep(2)
+
+print("RTDB DISPENSER CONTROLLER STARTED")
 
 # ---------------------------------------------------------
 # STATE
 # ---------------------------------------------------------
+last_run_state = False
 is_dispensing = False
-after_done_open_until = None
-
-lid_is_open = False
-disp_is_open = False
-last_closed_by_dog = False
-
-cat_present = False
-dog_present = False
-
-last_arduino_message = ""
 last_weight = 0.0
 
-# ---------------------------------------------------------
-# HELPERS
-# ---------------------------------------------------------
-def upload_weight(weight):
-    global last_weight
-    try:
-        last_weight = float(weight)
-    except:
-        last_weight = 0.0
 
+# ---------------------------------------------------------
+# FIREBASE HELPERS
+# ---------------------------------------------------------
+def set_status(status: str):
+    """Update status node so your ManualFeed.jsx displays it."""
+    db.reference("dispenser/cat").update({"status": status})
+
+
+def stop_run_flag():
+    """Reset run flag after completion."""
+    db.reference("dispenser/cat").update({"run": False})
+
+
+def update_final_weight(w):
+    """Store final weight after feeding completes."""
     db.reference("petfeeder/cat/bowlWeight").update({
-        "weight": last_weight,
+        "weight": w,
         "unit": "g",
         "timestamp": int(time.time())
     })
 
-def set_status(status):
-    db.reference("dispenser/cat").update({"status": status})
-
-def read_detection():
-    d = db.reference("detectionStatus").get() or {}
-    cat = d.get("cat", {}).get("detected", False)
-    dog = d.get("dog", {}).get("detected", False)
-    return bool(cat), bool(dog)
 
 # ---------------------------------------------------------
 # SERIAL LISTENER
 # ---------------------------------------------------------
 def serial_listener():
-    global lid_is_open, disp_is_open, last_arduino_message, last_weight
-    global is_dispensing, after_done_open_until, last_closed_by_dog
+    global last_weight, is_dispensing
 
     while True:
         line = ser.readline().decode(errors="ignore").strip()
         if not line:
             continue
 
-        last_arduino_message = line
         print("[ARDUINO]", line)
 
+        # LIVE weight updates
         if line.startswith("LIVE"):
-            parts = line.split()
-            if len(parts) >= 2:
-                try:
-                    w = float(parts[1])
-                    upload_weight(w)
-                except:
-                    pass
+            try:
+                last_weight = float(line.split()[1])
+            except:
+                pass
 
-        elif line.startswith("WEIGHT"):
-            parts = line.split()
-            if len(parts) >= 2:
-                try:
-                    w = float(parts[1])
-                    upload_weight(w)
-                except:
-                    pass
+        # FINAL weight after done
+        if line.startswith("WEIGHT"):
+            try:
+                final_w = float(line.split()[1])
+                update_final_weight(final_w)
+            except:
+                pass
 
-        elif line == "OPEN_LID":
-            lid_is_open = True
+        # DISPENSER OPEN
+        if line == "OPEN_DISP":
+            set_status("dispensing")
 
-        elif line == "OPEN_DISP":
-            disp_is_open = True
-
-        elif line == "CLOSED_LID":
-            lid_is_open = False
-
-        elif line == "CLOSED_DISP":
-            disp_is_open = False
-
-        elif line == "DONE":
-            is_dispensing = False
+        # COMPLETED
+        if line == "DONE":
             set_status("completed")
-            db.reference("dispenser/cat").update({"run": False})
-            after_done_open_until = time.time() + GRACE_PERIOD_AFTER_DONE
-            print("Feeding complete — Lid will remain open while cat is nearby.")
-
-        elif line == "FORCED_CLOSED":
-            lid_is_open = False
-            disp_is_open = False
-            last_closed_by_dog = True
-
-        elif line == "TIMEOUT_DISPENSE":
-            # Arduino forced close due to local timeout
+            stop_run_flag()
             is_dispensing = False
+
+        # TIMEOUT STOP FROM ARDUINO
+        if line == "TIMEOUT_DISPENSE":
             set_status("aborted_timeout")
-            db.reference("dispenser/cat").update({"run": False})
+            stop_run_flag()
+            is_dispensing = False
+
 
 # ---------------------------------------------------------
-# MAIN CONTROL LOOP
+# POLL RTDB AND TRIGGER DISPENSE
 # ---------------------------------------------------------
-def control_loop():
-    global is_dispensing, after_done_open_until
-    global lid_is_open, last_closed_by_dog
-
-    last_run = False
+def rtdb_loop():
+    global last_run_state, is_dispensing
 
     while True:
-
-        cat_present, dog_present = read_detection()
-
         node = db.reference("dispenser/cat").get() or {}
-        run = node.get("run", False)
+
+        run = bool(node.get("run", False))
         amount = float(node.get("amount", 0))
 
-        # -------------------------------------------------
-        # START DISPENSING (Frontend command)
-        # -------------------------------------------------
-        if run and not last_run:
-            print(f"Feed request received: {amount}g")
+        # Frontend pressed FEED
+        if run and not last_run_state:
+            print(f"FEED REQUEST RECEIVED: {amount}g")
 
-            # 1) Ask Arduino to open lid
-            ser.write(b"OPEN\n")
-            set_status("opening")
-            # wait for ack OPEN_LID (lid_is_open) with timeout
-            start_wait = time.time()
-            while time.time() - start_wait < OPEN_ACK_TIMEOUT:
-                if lid_is_open:
-                    break
-                time.sleep(0.05)
-            if not lid_is_open:
-                print("No OPEN_LID ack — proceeding anyway but logging")
-                set_status("opening_no_ack")
+            # Write status for UI
+            set_status("starting")
 
-            # 2) Send DISPENSE command
-            ser.write(f"DISPENSE {amount}\n".encode())
+            # Send command to Arduino
+            cmd = f"DISPENSE {amount}\n"
+            ser.write(cmd.encode())
             is_dispensing = True
-            set_status("feeding")
 
-        # -------------------------------------------------
-        # DOG DETECTED DURING DISPENSE → STOP IMMEDIATELY
-        # -------------------------------------------------
-        if is_dispensing and dog_present:
-            print("Dog detected → emergency CLOSE")
-            ser.write(b"CLOSE\n")
-            set_status("aborted_dog_detected")
-            is_dispensing = False
-            last_closed_by_dog = True
-            db.reference("dispenser/cat").update({"run": False})
-
-        # -------------------------------------------------
-        # IF DOG CLOSED THE LID BUT CAT COMES → REOPEN
-        # -------------------------------------------------
-        if last_closed_by_dog and cat_present:
-            print("Cat returned → Re-opening lid")
-            ser.write(b"OPEN\n")
-            last_closed_by_dog = False
-
-        # -------------------------------------------------
-        # AFTER DISPENSING (grace period handling)
-        # -------------------------------------------------
-        if after_done_open_until:
-            now = time.time()
-
-            if dog_present:
-                print("Dog detected during grace → closing lid")
-                ser.write(b"CLOSE\n")
-                after_done_open_until = None
-
-            elif cat_present:
-                # Reset timer (cat still eating)
-                after_done_open_until = now + GRACE_PERIOD_AFTER_DONE
-
-            elif now >= after_done_open_until:
-                print("Cat gone — closing lid after grace period")
-                ser.write(b"CLOSE\n")
-                after_done_open_until = None
-
-        last_run = run
+        last_run_state = run
         time.sleep(POLL_INTERVAL)
+
 
 # ---------------------------------------------------------
 # START THREADS
 # ---------------------------------------------------------
 threading.Thread(target=serial_listener, daemon=True).start()
-threading.Thread(target=control_loop, daemon=True).start()
+threading.Thread(target=rtdb_loop, daemon=True).start()
 
-print("CAT FEEDER CONTROLLER RUNNING...")
+# ---------------------------------------------------------
+# MAIN LOOP
+# ---------------------------------------------------------
 while True:
     time.sleep(1)
