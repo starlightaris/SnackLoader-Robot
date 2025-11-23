@@ -3,7 +3,7 @@ import serial, time, threading, os
 import firebase_admin
 from firebase_admin import credentials, db
 
-SERVICE_ACCOUNT = os.path.expanduser("/home/pi/SnackLoader-Robot/firebase/serviceAccountKey.json")
+SERVICE_ACCOUNT = os.path.expanduser("/home/eutech/serviceAccountKey.json")
 RTDB_URL = "https://snackloader-default-rtdb.asia-southeast1.firebasedatabase.app"
 
 if not firebase_admin._apps:
