@@ -69,14 +69,26 @@ def serial_listener():
 
         print("[ARDUINO]", line)
 
-        # LIVE weight updates
+        # LIVE weight updates → Firebase bowl weight update
         if line.startswith("LIVE"):
             try:
-                last_weight = float(line.split()[1])
-            except:
-                pass
+                live_weight = float(line.split()[1])
 
-        # FINAL weight after done
+                # update last_weight variable
+                last_weight = live_weight
+
+                # upload to RTDB
+                db.reference("petfeeder/cat/bowlWeight").update({
+                    "weight": live_weight,
+                    "unit": "g",
+                    "timestamp": int(time.time())
+                })
+
+            except Exception as e:
+                print("LIVE update error:", e)
+
+
+        # FINAL weight after done (kept exactly the same)
         if line.startswith("WEIGHT"):
             try:
                 final_w = float(line.split()[1])
