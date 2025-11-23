@@ -59,7 +59,7 @@ def send_not_detected(object_name):
     print(f"{object_name} NOT detected — set to false")
 
 # --------------------- OBJECT DETECTION ---------------------
-def getObjects(img, thres, nms, objects=['cat', 'dog']):
+def getObjects(img, thres, nms, draw=True):
     classIds, confs, bbox = net.detect(img, confThreshold=thres, nmsThreshold=nms)
     detected_now = {"cat": False, "dog": False}
 
@@ -67,31 +67,52 @@ def getObjects(img, thres, nms, objects=['cat', 'dog']):
         for classId, confidence, box in zip(classIds.flatten(), confs.flatten(), bbox):
             className = classNames[classId - 1]
 
-            if className in objects:
+            if className in ["cat", "dog"]:
                 detected_now[className] = True
+
+                # ---------------- DRAWING (GREEN BOX + TEXT + CENTER POINT) ----------------
+                if draw:
+                    # Rectangle box
+                    cv2.rectangle(img, box, color=(0, 255, 0), thickness=2)
+
+                    # Label name
+                    cv2.putText(img, className.upper(), (box[0] + 10, box[1] + 30),
+                                cv2.FONT_HERSHEY_COMPLEX, 1, (0, 255, 0), 2)
+
+                    # Confidence text
+                    cv2.putText(img, str(round(float(confidence) * 100, 2)) + '%',
+                                (box[0] + 200, box[1] + 30),
+                                cv2.FONT_HERSHEY_COMPLEX, 1, (0, 255, 0), 2)
+
+                    # Center point
+                    cx = box[0] + box[2] // 2
+                    cy = box[1] + box[3] // 2
+                    cv2.circle(img, (cx, cy), 5, (0, 255, 0), -1)
+
+                # ---------------- SEND TO FIREBASE ----------------
                 send_detected(className, confidence)
 
-    return detected_now
+    return img, detected_now
 
-# --------------------- MAIN ---------------------
+# --------------------- MAIN LOOP ---------------------
 cap = cv2.VideoCapture(0)
 cap.set(3, 640)
 cap.set(4, 480)
 
-print("Camera running... Press Q to exit.")
+print("Camera started. Press Q to quit.")
 
 while True:
     success, img = cap.read()
     if not success:
-        print("Camera Error")
+        print("Camera error.")
         break
 
-    detected = getObjects(img, 0.45, 0.2, ['cat', 'dog'])
+    img, detected = getObjects(img, 0.45, 0.2, draw=True)
 
-    # For both animals, send false if no detection
+    # Send false when not detected
     for animal in ["cat", "dog"]:
         if detected[animal] is False:
-            if last_detect[animal] is True:    # send false only when status changes
+            if last_detect[animal] is True:  # only send when detection stops
                 send_not_detected(animal)
             last_detect[animal] = False
         else:
