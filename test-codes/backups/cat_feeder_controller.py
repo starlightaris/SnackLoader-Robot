@@ -14,8 +14,6 @@ BAUD = 9600
 
 POLL_INTERVAL = 0.2  # seconds
 
-# Lid close timeout after dispensing (seconds)
-LID_IDLE_TIMEOUT = 20.0
 
 # ----------------- INIT FIREBASE -----------------
 cred = credentials.Certificate(SERVICE_ACCOUNT)
@@ -41,9 +39,6 @@ last_cat_detected = False
 last_dog_detected = False
 # timestamp of last cat detection (epoch seconds)
 last_cat_ts = 0
-# whether we are waiting after a dispense to auto-close lid
-post_dispense_waiting = False
-post_dispense_wait_start = 0.0
 
 # ----------------- FIREBASE REFERENCES -----------------
 dispenser_cat_ref = db.reference("dispenser/cat")
@@ -74,7 +69,7 @@ def update_final_weight(w):
 
 # ----------------- SERIAL LISTENER -----------------
 def serial_listener():
-    global is_dispensing, post_dispense_waiting, post_dispense_wait_start
+    global is_dispensing
     while True:
         if ser and ser.in_waiting > 0:
             try:
@@ -127,7 +122,7 @@ def serial_listener():
 # ----------------- MAIN RTDB POLL LOOP -----------------
 def rtdb_loop():
     global last_run_state, is_dispensing, last_cat_detected, last_dog_detected
-    global last_cat_ts, lid_open, post_dispense_waiting, post_dispense_wait_start
+    global last_cat_ts, lid_open
 
     while True:
         # read detection states
@@ -144,28 +139,17 @@ def rtdb_loop():
 
         # --- Lid logic based on detections (immediate rules) ---
         # If dog detected OR both present -> close lid immediately
-        if dog_detected and lid_open:
+        if dog_detected and lid_open and is_dispensing == False:
             print("Dog detected -> immediate lid close")
             send_serial("CLOSE_LID")
             lid_open = False
-            # cancel any post-dispense wait
-            post_dispense_waiting = False
-
-        elif cat_detected and dog_detected:
-            # both present -> close immediately (safety)
-            if lid_open:
-                print("Both detected -> immediate lid close")
-                send_serial("CLOSE_LID")
-                lid_open = False
-                post_dispense_waiting = False
-
-        elif cat_detected and not dog_detected:
-            # cat-only visible -> open lid immediately if closed
+            
+        elif cat_detected:
+            # cat-only -> open lid 
             if not lid_open:
                 print("Cat detected -> open lid")
                 send_serial("OPEN_LID")
                 lid_open = True
-                # don't start/stop post dispense here; if dispensing happening, lid stays open.
 
         # --- Poll for frontend-run feed request ---
         node = dispenser_cat_ref.get() or {}
@@ -190,40 +174,6 @@ def rtdb_loop():
 
         last_run_state = run
 
-        # --- Post-dispense waiting logic ---
-        if post_dispense_waiting:
-            elapsed = time.time() - post_dispense_wait_start
-            # If dog detected during wait -> close immediately
-            if dog_detected:
-                print("Dog detected during post-dispense -> immediate close")
-                send_serial("CLOSE_LID")
-                lid_open = False
-                post_dispense_waiting = False
-
-            # If both detected -> close immediately
-            elif cat_detected and dog_detected:
-                print("Both detected during post-dispense -> close")
-                send_serial("CLOSE_LID")
-                lid_open = False
-                post_dispense_waiting = False
-
-            # If cat seen recently (within timeout), keep waiting and reset timer
-            elif (time.time() - last_cat_ts) < LID_IDLE_TIMEOUT:
-                # cat present recently — keep lid open, restart timer (we implement by sliding window)
-                # Reset wait start so we get a full LID_IDLE_TIMEOUT after last detection
-                post_dispense_wait_start = time.time()
-            else:
-                # no cat detected within timeout -> close lid
-                if lid_open:
-                    print("No cat detected for timeout -> closing lid")
-                    send_serial("CLOSE_LID")
-                    lid_open = False
-                post_dispense_waiting = False
-
-        # --- Safety: if both not detected and lid is open and not in post-dispense wait,
-        # optionally close after some idle (optional) — we will not auto-close here to avoid
-        # interfering with intended open times. Keep conservative.
-
         time.sleep(POLL_INTERVAL)
 
 # ----------------- START THREADS -----------------
@@ -236,3 +186,7 @@ try:
         time.sleep(1)
 except KeyboardInterrupt:
     print("Exiting.")
+    
+    if lid_open:
+        print("Closing lid before shutdown...")
+        send_serial("CLOSE_LID")
