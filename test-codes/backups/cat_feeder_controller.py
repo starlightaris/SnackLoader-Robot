@@ -151,22 +151,6 @@ def rtdb_loop():
             # cancel any post-dispense wait
             post_dispense_waiting = False
 
-        elif cat_detected and dog_detected:
-            # both present -> close immediately (safety)
-            if lid_open:
-                print("Both detected -> immediate lid close")
-                send_serial("CLOSE_LID")
-                lid_open = False
-                post_dispense_waiting = False
-
-        elif cat_detected and not dog_detected:
-            # cat-only visible -> open lid immediately if closed
-            if not lid_open:
-                print("Cat detected -> open lid")
-                send_serial("OPEN_LID")
-                lid_open = True
-                # don't start/stop post dispense here; if dispensing happening, lid stays open.
-
         # --- Poll for frontend-run feed request ---
         node = dispenser_cat_ref.get() or {}
         run = bool(node.get("run", False))
