@@ -9,7 +9,7 @@ from firebase_admin import credentials, db
 SERVICE_ACCOUNT = "/home/eutech/serviceAccountKey.json"  # your file
 RTDB_URL = "https://snackloader-default-rtdb.asia-southeast1.firebasedatabase.app/"
 
-PORT = "/dev/ttyUSB0"   # change to your serial port
+PORT = "/dev/ttyACM0"   # change to your serial port
 BAUD = 9600
 
 POLL_INTERVAL = 0.2  # seconds
@@ -41,8 +41,8 @@ last_dog_detected = False
 last_cat_ts = 0
 
 # ----------------- FIREBASE REFERENCES -----------------
-dispenser_cat_ref = db.reference("dispenser/cat")
-petfeeder_cat_ref = db.reference("petfeeder/cat/bowlWeight")
+dispenser_dog_ref = db.reference("dispenser/dog")
+petfeeder_dog_ref = db.reference("petfeeder/dog/bowlWeight")
 det_ref = db.reference("detectionStatus")
 
 # ----------------- HELPERS -----------------
@@ -55,13 +55,13 @@ def send_serial(cmd: str):
         print("[SEND-FAILED]", cmd)
 
 def set_status(status: str):
-    dispenser_cat_ref.update({"status": status})
+    dispenser_dog_ref.update({"status": status})
 
 def stop_run_flag():
-    dispenser_cat_ref.update({"run": False})
+    dispenser_dog_ref.update({"run": False})
 
 def update_final_weight(w):
-    petfeeder_cat_ref.update({
+    petfeeder_dog_ref.update({
         "weight": w,
         "unit": "g",
         "timestamp": int(time.time())
@@ -85,7 +85,7 @@ def serial_listener():
                 try:
                     live_weight = float(line.split()[1])
                     # update last weight in RTDB
-                    petfeeder_cat_ref.update({
+                    petfeeder_dog_ref.update({
                         "weight": live_weight,
                         "unit": "g",
                         "timestamp": int(time.time())
@@ -134,25 +134,25 @@ def rtdb_loop():
         dog_detected = bool(dog_node.get("detected", False))
 
         # update timestamps if detected
-        if cat_detected:
-            last_cat_ts = int(time.time())
+        if dog_detected:
+            last_dog_ts = int(time.time())
 
         # --- Lid logic based on detections (immediate rules) ---
-        # If dog detected OR both present -> close lid immediately
-        if dog_detected and lid_open and is_dispensing == False:
-            print("Dog detected -> immediate lid close")
+        # If cat detected OR both present -> close lid immediately
+        if cat_detected and lid_open and is_dispensing == False:
+            print("Cat detected -> immediate lid close")
             send_serial("CLOSE_LID")
             lid_open = False
             
-        elif cat_detected:
-            # cat-only -> open lid 
+        elif dog_detected:
+            # dog-only -> open lid 
             if not lid_open:
-                print("Cat detected -> open lid")
+                print("Dog detected -> open lid")
                 send_serial("OPEN_LID")
                 lid_open = True
 
         # --- Poll for frontend-run feed request ---
-        node = dispenser_cat_ref.get() or {}
+        node = dispenser_dog_ref.get() or {}
         run = bool(node.get("run", False))
         amount = float(node.get("amount", 0) or 0)
 
