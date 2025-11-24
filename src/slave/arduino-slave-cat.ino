@@ -1,72 +1,80 @@
 #include <Stepper.h>
 #include "HX711.h"
 
-// ------------------- STEPPER (DISPENSER ONLY) -------------------
-const int STEPS_PER_REV = 2048;
-Stepper dispStepper(STEPS_PER_REV, 7, 5, 6, 4);
+//  DISPENSER STEPPER
+Stepper dispStepper(2048, 7, 5, 6, 4);
+const int DISP_OPEN_STEPS  = 350;
+const int DISP_CLOSE_STEPS = -350;
 
-const int OPEN_STEPS  = 350;   // adjust for your feeder
-const int CLOSE_STEPS = -350;  // reverse direction
+//  LID STEPPER
+Stepper lidStepper(2048, 11, 9, 10, 8);
+const int LID_OPEN_STEPS  = 500;
+const int LID_CLOSE_STEPS = -500;
 
-// ------------------- HX711 SCALE -------------------
+//  HX711 SCALE
 #define DT 2
 #define SCK 3
 HX711 scale;
-
 float calibration_factor = 471709.53;
 
-// ------------------- STATE -------------------
+//  STATE
 bool dispensing = false;
 float targetGrams = 0;
 unsigned long lastLiveSend = 0;
+bool lidStatus = false;
 
-
-// ---------------- FAST SAMPLE (for closing) ----------------
 float getFastWeight() {
-  long raw = scale.read(); // single HX711 sample (fast)
+  long raw = scale.read();
   float kg = (raw - scale.get_offset()) / scale.get_scale();
   if (kg < 0) kg = 0;
   return kg * 1000.0;
 }
 
-
-// ---------------- SMOOTH SAMPLE (for live streaming) --------
 float getLiveWeight() {
-  float kg = scale.get_units(10);  // stable average
+  float kg = scale.get_units(10);
   if (kg < 0) kg = 0;
   return kg * 1000.0;
 }
 
-
-// ---------------- STEPPER CONTROL ----------------
 void openDispenser() {
-  dispStepper.step(OPEN_STEPS);
+  dispStepper.step(DISP_OPEN_STEPS);
   Serial.println("OPEN_DISP");
 }
 
 void closeDispenser() {
-  dispStepper.step(CLOSE_STEPS);
+  dispStepper.step(DISP_CLOSE_STEPS);
   Serial.println("CLOSED_DISP");
 }
 
+void openLid() {
+  lidStepper.step(LID_OPEN_STEPS);
+  lidStatus = true;
+  Serial.println("OPEN_LID");
+  Serial.println("LID_OPENED");
+}
 
-// ---------------- START DISPENSING ----------------
+void closeLid() {
+  lidStepper.step(LID_CLOSE_STEPS);
+  lidStatus = false;
+  Serial.println("CLOSE_LID");
+  Serial.println("LID_CLOSED");
+}
+
 void startDispense(float grams) {
   targetGrams = grams;
   dispensing = true;
-
-  openDispenser();
-
+  if ( lidStatus == false){
+    openLid();
+  }
   Serial.print("TARGET ");
   Serial.println(targetGrams);
 }
 
-
-// ---------------- SETUP ----------------
 void setup() {
   Serial.begin(9600);
 
   dispStepper.setSpeed(15);
+  lidStepper.setSpeed(15);
 
   scale.begin(DT, SCK);
   scale.set_scale(calibration_factor);
@@ -77,11 +85,8 @@ void setup() {
   Serial.println("READY");
 }
 
-
-// ---------------- MAIN LOOP ----------------
 void loop() {
 
-  // ===== REAL-TIME TARGET CHECK =====
   if (dispensing) {
     float fastW = getFastWeight();
 
@@ -98,8 +103,6 @@ void loop() {
     }
   }
 
-
-  // ===== LIVE STREAM TO PYTHON (unchanged logic) =====
   if (millis() - lastLiveSend > 300) {
     float liveW = getLiveWeight();
 
@@ -109,24 +112,33 @@ void loop() {
     lastLiveSend = millis();
   }
 
-
-  // ===== COMMAND LISTENER =====
   if (Serial.available() > 0) {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
 
-    if (cmd.startsWith("DISPENSE")) {
+    // Commands:
+    // OPEN_LID / CLOSE_LID
+    // DISPENSE <grams>
+    // STOP
+    // OPEN_DISP / CLOSE_DISP
+
+    if (cmd == "OPEN_LID") {
+      openLid();
+    } else if (cmd == "CLOSE_LID") {
+      closeLid();
+    } else if (cmd.startsWith("DISPENSE")) {
       float grams = cmd.substring(8).toFloat();
       if (grams > 0) {
         startDispense(grams);
+        openDispenser();
       }
-    }
-
-    if (cmd == "STOP") {
+    } else if (cmd == "STOP") {
       dispensing = false;
       closeDispenser();
       Serial.println("STOPPED");
-    }
+    } else if (cmd == "FORCE_CLOSE_LID") {
+      closeLid();
+    } 
   }
 
   delay(10);
