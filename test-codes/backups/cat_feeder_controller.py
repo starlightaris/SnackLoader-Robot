@@ -43,7 +43,7 @@ last_dog_detected = False
 last_cat_ts = 0
 # whether we are waiting after a dispense to auto-close lid
 post_dispense_waiting = False
-post_dispense_wait_start = 0.0
+post_dispense_wait_start = 10
 
 # ----------------- FIREBASE REFERENCES -----------------
 dispenser_cat_ref = db.reference("dispenser/cat")
@@ -144,7 +144,7 @@ def rtdb_loop():
 
         # --- Lid logic based on detections (immediate rules) ---
         # If dog detected OR both present -> close lid immediately
-        if dog_detected and lid_open:
+        if dog_detected and lid_open and is_dispensing == false:
             print("Dog detected -> immediate lid close")
             send_serial("CLOSE_LID")
             lid_open = False
