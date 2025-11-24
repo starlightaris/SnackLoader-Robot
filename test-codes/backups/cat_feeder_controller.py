@@ -15,7 +15,7 @@ BAUD = 9600
 POLL_INTERVAL = 0.2  # seconds
 
 # Lid close timeout after dispensing (seconds)
-LID_IDLE_TIMEOUT = 20.0
+LID_IDLE_TIMEOUT = 60.0
 
 # ----------------- INIT FIREBASE -----------------
 cred = credentials.Certificate(SERVICE_ACCOUNT)
@@ -43,7 +43,7 @@ last_dog_detected = False
 last_cat_ts = 0
 # whether we are waiting after a dispense to auto-close lid
 post_dispense_waiting = False
-post_dispense_wait_start = 10
+post_dispense_wait_start = 30
 
 # ----------------- FIREBASE REFERENCES -----------------
 dispenser_cat_ref = db.reference("dispenser/cat")
@@ -144,12 +144,19 @@ def rtdb_loop():
 
         # --- Lid logic based on detections (immediate rules) ---
         # If dog detected OR both present -> close lid immediately
-        if dog_detected and lid_open and is_dispensing == false:
+        if dog_detected and lid_open and is_dispensing == False:
             print("Dog detected -> immediate lid close")
             send_serial("CLOSE_LID")
             lid_open = False
             # cancel any post-dispense wait
             post_dispense_waiting = False
+            
+        elif cat_detected:
+            # cat-only -> open lid 
+            if not lid_open:
+                print("Cat detected -> open lid")
+                send_serial("OPEN_LID")
+                lid_open = True
 
         # --- Poll for frontend-run feed request ---
         node = dispenser_cat_ref.get() or {}
