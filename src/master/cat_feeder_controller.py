@@ -1,25 +1,24 @@
-# dispenser_controller.py
 import serial
 import time
 import threading
 import firebase_admin
 from firebase_admin import credentials, db
 
-# ----------------- CONFIG -----------------
+# CONFIG 
 SERVICE_ACCOUNT = "/home/eutech/serviceAccountKey.json"  # your file
 RTDB_URL = "https://snackloader-default-rtdb.asia-southeast1.firebasedatabase.app/"
 
-PORT = "/dev/ttyUSB0"   # change to your serial port
+PORT = "/dev/ttyUSB0" 
 BAUD = 9600
 
 POLL_INTERVAL = 0.2  # seconds
 
 
-# ----------------- INIT FIREBASE -----------------
+# INIT FIREBASE 
 cred = credentials.Certificate(SERVICE_ACCOUNT)
 firebase_admin.initialize_app(cred, {"databaseURL": RTDB_URL})
 
-# ----------------- SERIAL -----------------
+# SERIAL
 try:
     ser = serial.Serial(PORT, BAUD, timeout=1)
     time.sleep(2)
@@ -29,10 +28,13 @@ except Exception as e:
 
 print("RTDB DISPENSER + LID CONTROLLER STARTED")
 
-# ----------------- STATE -----------------
+# STATE
 last_run_state = False
 is_dispensing = False
 last_weight = 0.0
+
+dispense_start_time = 0
+DISPENSE_TIMEOUT = 10   # seconds
 
 lid_open = False
 last_cat_detected = False
@@ -40,12 +42,12 @@ last_dog_detected = False
 # timestamp of last cat detection (epoch seconds)
 last_cat_ts = 0
 
-# ----------------- FIREBASE REFERENCES -----------------
+# FIREBASE REFERENCES 
 dispenser_cat_ref = db.reference("dispenser/cat")
 petfeeder_cat_ref = db.reference("petfeeder/cat/bowlWeight")
 det_ref = db.reference("detectionStatus")
 
-# ----------------- HELPERS -----------------
+# HELPERS
 def send_serial(cmd: str):
     """Send serial command to Arduino."""
     if ser and ser.is_open:
@@ -67,7 +69,7 @@ def update_final_weight(w):
         "timestamp": int(time.time())
     })
 
-# ----------------- SERIAL LISTENER -----------------
+# SERIAL LISTENER
 def serial_listener():
     global is_dispensing
     while True:
@@ -113,10 +115,18 @@ def serial_listener():
                 is_dispensing = False
                 set_status("completed")
                 stop_run_flag()
+            
+            # TIMEOUT CHECK
+            if is_dispensing and (time.time() - dispense_start_time > DISPENSE_TIMEOUT):
+                print("ERROR: Dispense timeout reached! Forcing stop.")
+                set_status("failed")
+                stop_run_flag()
+                send_serial("STOP")
+                is_dispensing = False
 
         time.sleep(0.01)
 
-# ----------------- MAIN RTDB POLL LOOP -----------------
+# MAIN RTDB POLL LOOP
 def rtdb_loop():
     global last_run_state, is_dispensing, last_cat_detected, last_dog_detected
     global last_cat_ts, lid_open
@@ -135,7 +145,6 @@ def rtdb_loop():
             last_cat_ts = int(time.time())
 
         # --- Lid logic based on detections (immediate rules) ---
-        # If dog detected OR both present -> close lid immediately
         if dog_detected and lid_open and is_dispensing == False:
             print("Dog detected -> immediate lid close")
             send_serial("CLOSE_LID")
@@ -157,17 +166,18 @@ def rtdb_loop():
         if run and not last_run_state:
             print(f"FEED REQUEST RECEIVED: {amount}g")
             set_status("starting")
-            # Ensure lid is open BEFORE dispensing
+
+            # lid opens first
             if not lid_open:
                 print("Opening lid before dispense")
                 send_serial("OPEN_LID")
                 lid_open = True
-                # give Arduino small time to move lid before dispensing
                 time.sleep(0.6)
             # send dispense command
             cmd = f"DISPENSE {amount}"
             send_serial(cmd)
             is_dispensing = True
+            dispense_start_time = time.time()          
 
         last_run_state = run
 
