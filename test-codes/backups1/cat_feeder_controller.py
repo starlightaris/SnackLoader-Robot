@@ -6,11 +6,12 @@ import firebase_admin
 from firebase_admin import credentials, db
 
 # ----------------- CONFIG -----------------
-SERVICE_ACCOUNT = "/home/eutech/serviceAccountKey.json"
+SERVICE_ACCOUNT = "/home/eutech/serviceAccountKey.json"  # your file
 RTDB_URL = "https://snackloader-default-rtdb.asia-southeast1.firebasedatabase.app/"
 
-PORT = "/dev/ttyUSB1"
+PORT = "/dev/ttyUSB1"   # change to your serial port
 BAUD = 9600
+
 POLL_INTERVAL = 0.2  # seconds
 
 # ----------------- INIT FIREBASE -----------------
@@ -35,17 +36,13 @@ last_weight = 0.0
 lid_open = False
 last_cat_detected = False
 last_dog_detected = False
-
 last_cat_ts = 0
 
-# DISPENSER TIMER
-dispense_start_ts = 0
-dispense_timeout_sec = 5  # 5 seconds timeout if no DONE received
-
-# DETECTION CONFIRMATION TIMERS
+# >>> CHANGE START — detection confirmation timers
 cat_detect_ts = 0
 dog_detect_ts = 0
-no_detect_ts = 0
+none_detect_ts = 0
+# <<< CHANGE END
 
 # ----------------- FIREBASE REFERENCES -----------------
 dispenser_cat_ref = db.reference("dispenser/cat")
@@ -82,13 +79,11 @@ def serial_listener():
                 line = ser.readline().decode(errors="ignore").strip()
             except:
                 continue
-
             if not line:
                 continue
 
             print("[ARDUINO]", line)
 
-            # LIVE WEIGHT
             if line.startswith("LIVE"):
                 try:
                     live_weight = float(line.split()[1])
@@ -100,7 +95,6 @@ def serial_listener():
                 except:
                     pass
 
-            # FINAL WEIGHT
             if line.startswith("WEIGHT"):
                 try:
                     final_w = float(line.split()[1])
@@ -108,29 +102,26 @@ def serial_listener():
                 except:
                     pass
 
-            # LID STATUS (optional debugging)
             if line in ["OPEN_LID", "LID_OPENED"]:
-                print("LID OPEN REPORTED")
+                print("LID opened (Arduino reported).")
             if line in ["CLOSE_LID", "LID_CLOSED"]:
-                print("LID CLOSE REPORTED")
+                print("LID closed (Arduino reported).")
 
-            # DISPENSING DONE
             if line == "DONE":
                 print("Dispense DONE")
+                is_dispensing = False
                 set_status("completed")
                 stop_run_flag()
-                is_dispensing = False
 
         time.sleep(0.01)
 
 # ----------------- MAIN RTDB POLL LOOP -----------------
 def rtdb_loop():
     global last_run_state, is_dispensing, lid_open
-    global cat_detect_ts, dog_detect_ts, no_detect_ts
-    global dispense_start_ts
+    global cat_detect_ts, dog_detect_ts, none_detect_ts
 
     while True:
-        # READ DETECTION
+        # read detection states
         det = det_ref.get() or {}
         cat_node = det.get("cat", {}) or {}
         dog_node = det.get("dog", {}) or {}
@@ -140,77 +131,60 @@ def rtdb_loop():
 
         now = time.time()
 
-        # Update timestamps
+        # >>> CHANGE START — detection timestamp tracking
         if cat_detected:
             cat_detect_ts = now
         if dog_detected:
             dog_detect_ts = now
         if not cat_detected and not dog_detected:
-            no_detect_ts = now
+            none_detect_ts = now
+        # <<< CHANGE END
 
-        # ------------------------------
-        # LID CONFIRMATION LOGIC
-        # ------------------------------
-
-        # Dog confirmed 5s → CLOSE LID
-        if now - dog_detect_ts >= 5:
+        # >>> CHANGE START — 3s confirmation logic + 10s none-detected close
+        # DOG confirmed 3 seconds -> CLOSE lid
+        if (now - dog_detect_ts) >= 3 and dog_detected:
             if lid_open and not is_dispensing:
-                print("🐶 Dog 5s → CLOSE lid")
+                print("🐶 Dog 3s → Close lid")
                 send_serial("CLOSE_LID")
                 lid_open = False
 
-        # Cat confirmed 5s → OPEN LID
-        elif now - cat_detect_ts >= 5:
-            if not lid_open:
-                print("🐱 Cat 5s → OPEN lid")
+        # CAT confirmed 3 seconds -> OPEN lid
+        elif (now - cat_detect_ts) >= 3 and cat_detected:
+            if not lid_open and not is_dispensing:
+                print("🐱 Cat 3s → Open lid")
                 send_serial("OPEN_LID")
                 lid_open = True
 
-        # No detection 10s → CLOSE LID
-        elif now - no_detect_ts >= 10:
+        # NO detection for 10 seconds -> CLOSE lid
+        elif (now - none_detect_ts) >= 10:
             if lid_open and not is_dispensing:
-                print("⛔ No detection 10s → CLOSE lid")
+                print("⛔ No detection 10s → Close lid")
                 send_serial("CLOSE_LID")
                 lid_open = False
+        # <<< CHANGE END
 
-        # ------------------------------
-        # FEED REQUEST HANDLING
-        # ------------------------------
-
+        # --- Poll for feed request ---
         node = dispenser_cat_ref.get() or {}
         run = bool(node.get("run", False))
         amount = float(node.get("amount", 0) or 0)
 
-        # START FEEDING
+        # Frontend pressed FEED
         if run and not last_run_state:
             print(f"FEED REQUEST RECEIVED: {amount}g")
             set_status("starting")
 
-            # Start timeout timer
-            dispense_start_ts = time.time()
-
-            # Open lid before dispense
+            # ensure lid open before feeding
             if not lid_open:
-                print("Opening lid before dispensing…")
+                print("Opening lid before dispense...")
                 send_serial("OPEN_LID")
                 lid_open = True
                 time.sleep(0.6)
 
-            send_serial(f"DISPENSE {amount}")
+            cmd = f"DISPENSE {amount}"
+            send_serial(cmd)
             is_dispensing = True
 
         last_run_state = run
-
-        # ------------------------------
-        # DISPENSER TIMEOUT CHECK (5s)
-        # ------------------------------
-        if is_dispensing:
-            if time.time() - dispense_start_ts > dispense_timeout_sec:
-                print("❌ DISPENSER TIMEOUT → NOT ENOUGH FOOD")
-
-                set_status("error_no_food")
-                stop_run_flag()
-                is_dispensing = False
 
         time.sleep(POLL_INTERVAL)
 
@@ -223,8 +197,8 @@ try:
     while True:
         time.sleep(1)
 except KeyboardInterrupt:
-    print("Exiting...")
+    print("Exiting.")
 
     if lid_open:
-        print("Closing lid before shutdown")
+        print("Closing lid before shutdown...")
         send_serial("CLOSE_LID")
