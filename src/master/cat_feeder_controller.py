@@ -40,6 +40,9 @@ last_dog_detected = False
 # timestamp of last cat detection (epoch seconds)
 last_cat_ts = 0
 
+# Timeout variables
+timeout_active = False
+
 # ----------------- FIREBASE REFERENCES -----------------
 dispenser_cat_ref = db.reference("dispenser/cat")
 petfeeder_cat_ref = db.reference("petfeeder/cat/bowlWeight")
@@ -66,6 +69,37 @@ def update_final_weight(w):
         "unit": "g",
         "timestamp": int(time.time())
     })
+
+def start_timeout_counter():
+    global timeout_active
+    timeout_active = True
+    
+    def timeout_loop():
+        for i in range(1, 11):  # Count 1 to 10
+            if not timeout_active:
+                return
+            print(f"Timeout counter: {i}/10")
+            time.sleep(1)
+        
+        # After 10s, check if still dispensing
+        if is_dispensing and timeout_active:
+            print("TIMEOUT: Dispensing taking too long - Closing lid")
+            send_serial("CLOSE_LID")
+            lid_open = False
+            is_dispensing = False
+            set_status("failed")
+            stop_run_flag()
+        
+        timeout_active = False
+    
+    # Run the timeout in a separate thread
+    threading.Thread(target=timeout_loop, daemon=True).start()
+    print("Timeout counter started - 10 seconds")
+
+def stop_timeout_counter():
+    global timeout_active
+    timeout_active = False
+    print("Timeout counter stopped")
 
 # ----------------- SERIAL LISTENER -----------------
 def serial_listener():
@@ -116,6 +150,15 @@ def serial_listener():
                 is_dispensing = False
                 set_status("completed")
                 stop_run_flag()
+                stop_timeout_counter()
+
+            # Dispensing timeout
+            if line == "FAIL":
+                    print("Dispense FAILED")
+                    is_dispensing = False
+                    set_status("failed")
+                    stop_run_flag()
+                    stop_timeout_counter()
 
         time.sleep(0.01)
 
@@ -171,6 +214,7 @@ def rtdb_loop():
             cmd = f"DISPENSE {amount}"
             send_serial(cmd)
             is_dispensing = True
+            start_timeout_counter()
 
         last_run_state = run
 

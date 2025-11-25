@@ -11,7 +11,7 @@ firebase_admin.initialize_app(cred, {
 
 temp_ref = db.reference("temperature")
 
-def read_temperature_from_arduino(port="/dev/ttyACM0", baud=9600):
+def read_temperature_from_arduino(port="/dev/ttyACM1", baud=9600):
     ser = serial.Serial(port, baud, timeout=1)
     time.sleep(2)  # allow Arduino to reset
     return ser

@@ -38,7 +38,7 @@ lid_open = False
 last_cat_detected = False
 last_dog_detected = False
 # timestamp of last cat detection (epoch seconds)
-last_cat_ts = 0
+last_dog_ts = 0
 
 # ----------------- FIREBASE REFERENCES -----------------
 dispenser_dog_ref = db.reference("dispenser/dog")
@@ -109,10 +109,7 @@ def serial_listener():
 
             # When dispensing completes
             if line == "DONE":
-                print("Dispense DONE: starting post-dispense waiting")
-                # start waiting countdown to auto-close lid
-                post_dispense_waiting = True
-                post_dispense_wait_start = time.time()
+                print("Dispense DONE")
                 is_dispensing = False
                 set_status("completed")
                 stop_run_flag()
@@ -122,7 +119,7 @@ def serial_listener():
 # ----------------- MAIN RTDB POLL LOOP -----------------
 def rtdb_loop():
     global last_run_state, is_dispensing, last_cat_detected, last_dog_detected
-    global last_cat_ts, lid_open
+    global last_dog_ts, lid_open
 
     while True:
         # read detection states
@@ -138,7 +135,6 @@ def rtdb_loop():
             last_dog_ts = int(time.time())
 
         # --- Lid logic based on detections (immediate rules) ---
-        # If cat detected OR both present -> close lid immediately
         if cat_detected and lid_open and is_dispensing == False:
             print("Cat detected -> immediate lid close")
             send_serial("CLOSE_LID")
