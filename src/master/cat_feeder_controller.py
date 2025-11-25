@@ -34,7 +34,7 @@ is_dispensing = False
 last_weight = 0.0
 
 dispense_start_time = 0
-DISPENSE_TIMEOUT = 30   # seconds
+DISPENSE_TIMEOUT = 1000
 
 lid_open = False
 last_cat_detected = False
