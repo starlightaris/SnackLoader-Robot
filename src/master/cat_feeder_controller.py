@@ -33,9 +33,6 @@ last_run_state = False
 is_dispensing = False
 last_weight = 0.0
 
-dispense_start_time = 0
-DISPENSE_TIMEOUT_COUNT = 1000
-
 lid_open = False
 last_cat_detected = False
 last_dog_detected = False
@@ -71,7 +68,7 @@ def update_final_weight(w):
 
 # SERIAL LISTENER
 def serial_listener():
-    global is_dispensing, dispense_start_time, dispense_counter
+    global is_dispensing
     while True:
         if ser and ser.in_waiting > 0:
             try:
@@ -115,23 +112,21 @@ def serial_listener():
                 print("[TIMER] Dispenser started moving. Counter = 0")
 
             # Timeout check (counter-based)
-            if is_dispensing:
-                dispense_counter += 1
+            if line == "OPEND_DISP":
+                for i in range(1, 11):
 
-                if dispense_counter >= DISPENSE_TIMEOUT_COUNT:
-                    print("!!! DISPENSE TIMEOUT — forcing stop !!!")
+                    if i == 10 and is_dispensing == True:
+                        print("!!! DISPENSE TIMEOUT — forcing stop !!!")
 
-                    send_serial("STOP")
-                    set_status("failed")
-                    stop_run_flag()
+                        send_serial("STOP")
+                        set_status("failed")
+                        stop_run_flag()
 
-                    is_dispensing = False
-                    dispense_counter = 0  # reset
+                        is_dispensing = False
 
             # When dispensing completes
             if line == "DONE":
                 is_dispensing = False
-                dispense_counter = 0
                 set_status("completed")
                 stop_run_flag()
 
