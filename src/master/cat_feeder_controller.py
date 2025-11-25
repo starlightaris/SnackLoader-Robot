@@ -9,7 +9,7 @@ from firebase_admin import credentials, db
 SERVICE_ACCOUNT = "/home/eutech/serviceAccountKey.json"  # your file
 RTDB_URL = "https://snackloader-default-rtdb.asia-southeast1.firebasedatabase.app/"
 
-PORT = "/dev/ttyUSB1"   # change to your serial port
+PORT = "/dev/ttyUSB0"   # change to your serial port
 BAUD = 9600
 
 POLL_INTERVAL = 0.2  # seconds
@@ -109,10 +109,7 @@ def serial_listener():
 
             # When dispensing completes
             if line == "DONE":
-                print("Dispense DONE: starting post-dispense waiting")
-                # start waiting countdown to auto-close lid
-                post_dispense_waiting = True
-                post_dispense_wait_start = time.time()
+                print("Dispense DONE")
                 is_dispensing = False
                 set_status("completed")
                 stop_run_flag()
