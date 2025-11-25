@@ -188,4 +188,3 @@ except KeyboardInterrupt:
         print("Closing lid before shutdown...")
         send_serial("CLOSE_LID")
 
-
