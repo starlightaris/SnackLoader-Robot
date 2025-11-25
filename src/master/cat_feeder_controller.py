@@ -104,26 +104,8 @@ def serial_listener():
             if line == "OPEN_LID" or line == "LID_OPENED":
                 print("LID opened (arduino reported).")
             if line == "CLOSE_LID" or line == "LID_CLOSED":
-                print("LID closed (arduino reported).")
+                print("LID closed (arduino reported).")  
             
-            # Timeout Check
-            if line == "OPEN_DISP":
-                dispense_counter = 0
-                print("[TIMER] Dispenser started moving. Counter = 0")
-
-            # Timeout check (counter-based)
-            if line == "OPEND_DISP":
-                for i in range(1, 11):
-
-                    if i == 10 and is_dispensing == True:
-                        print("!!! DISPENSE TIMEOUT — forcing stop !!!")
-
-                        send_serial("STOP")
-                        set_status("failed")
-                        stop_run_flag()
-
-                        is_dispensing = False
-
             # When dispensing completes
             if line == "DONE":
                 is_dispensing = False
@@ -200,7 +182,7 @@ except KeyboardInterrupt:
     print("Exiting.")
     
     if lid_open:
-        print("Closing lid before shutdown...")
+        print("Closing lids before shutdown...")
         send_serial("CLOSE_LID")
 
 
