@@ -16,7 +16,7 @@ POLL_INTERVAL = 0.2  # seconds
 
 
 # ----------------- INIT FIREBASE -----------------
-cred = credentials.Certificate(SERVICE_ACCOUNT)\
+cred = credentials.Certificate(SERVICE_ACCOUNT)
 firebase_admin.initialize_app(cred, {"databaseURL": RTDB_URL})
 
 # ----------------- SERIAL -----------------
