@@ -108,21 +108,22 @@ def serial_listener():
                 print("LID opened (arduino reported).")
             if line == "CLOSE_LID" or line == "LID_CLOSED":
                 print("LID closed (arduino reported).")
-
-            # When dispensing completes
-            if line == "DONE":
-                print("Dispense DONE")
-                is_dispensing = False
-                set_status("completed")
-                stop_run_flag()
             
-            # TIMEOUT CHECK
+            # Timeout Check
             if is_dispensing and (time.time() - dispense_start_time > DISPENSE_TIMEOUT):
                 print("ERROR: Dispense timeout reached! Forcing stop.")
                 set_status("failed")
                 stop_run_flag()
                 send_serial("STOP")
                 is_dispensing = False
+
+            # When dispensing completes
+            if line == "DONE":
+                print("Dispense DONE")
+                is_dispensing = False
+                dispense_start_time = 0
+                set_status("completed")
+                stop_run_flag()
 
         time.sleep(0.01)
 
