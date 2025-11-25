@@ -34,7 +34,7 @@ is_dispensing = False
 last_weight = 0.0
 
 dispense_start_time = 0
-DISPENSE_TIMEOUT = 1000
+DISPENSE_TIMEOUT_COUNT = 1000
 
 lid_open = False
 last_cat_detected = False
@@ -71,7 +71,7 @@ def update_final_weight(w):
 
 # SERIAL LISTENER
 def serial_listener():
-    global is_dispensing
+    global is_dispensing, dispense_start_time, dispense_counter
     while True:
         if ser and ser.in_waiting > 0:
             try:
@@ -110,18 +110,28 @@ def serial_listener():
                 print("LID closed (arduino reported).")
             
             # Timeout Check
-            if is_dispensing and (time.time() - dispense_start_time > DISPENSE_TIMEOUT):
-                print("ERROR: Dispense timeout reached! Forcing stop.")
-                set_status("failed")
-                stop_run_flag()
-                send_serial("STOP")
-                is_dispensing = False
+            if line == "OPEN_DISP":
+                dispense_counter = 0
+                print("[TIMER] Dispenser started moving. Counter = 0")
+
+            # Timeout check (counter-based)
+            if is_dispensing:
+                dispense_counter += 1
+
+                if dispense_counter >= DISPENSE_TIMEOUT_COUNT:
+                    print("!!! DISPENSE TIMEOUT — forcing stop !!!")
+
+                    send_serial("STOP")
+                    set_status("failed")
+                    stop_run_flag()
+
+                    is_dispensing = False
+                    dispense_counter = 0  # reset
 
             # When dispensing completes
             if line == "DONE":
-                print("Dispense DONE")
                 is_dispensing = False
-                dispense_start_time = 0
+                dispense_counter = 0
                 set_status("completed")
                 stop_run_flag()
 
@@ -177,8 +187,7 @@ def rtdb_loop():
             # send dispense command
             cmd = f"DISPENSE {amount}"
             send_serial(cmd)
-            is_dispensing = True
-            dispense_start_time = time.time()          
+            is_dispensing = True      
 
         last_run_state = run
 
