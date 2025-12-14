@@ -1,4 +1,4 @@
-## 🐾 SnackLoader Robot
+# 🐾 SnackLoader Robot
 
 An IoT-enabled automatic pet feeder built using a Raspberry Pi 4, Arduino, and computer vision.
 The system detects pets using a camera, dispenses a controlled amount of food using load cells and stepper motors, and sends feeding data to a web application.
@@ -18,7 +18,7 @@ This project is designed for households with multiple pets (cat & dog) where foo
 
 ---
 
-🔁 System Workflow
+## 🔁 System Workflow
 
 1. Pet Detection: Raspberry Pi continuously monitors the camera feed and identifies the pet (cat or dog).
 2. Pet Selection: Based on the detected pet, the Pi selects the corresponding Arduino controlling that pet’s feeder.
