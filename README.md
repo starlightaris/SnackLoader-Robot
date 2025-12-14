@@ -23,17 +23,17 @@ This project is designed for households with multiple pets (cat & dog) where foo
 1. Pet Detection: Raspberry Pi continuously monitors the camera feed and identifies the pet (cat or dog).
 2. Pet Selection: Based on the detected pet, the Pi selects the corresponding Arduino controlling that pet’s feeder.
 3. Feeding Schedule: The web app sends feeding parameters to the Pi:
-  * Amount of food to dispense
- 	* Scheduled time to feed
-4. Command Forwarding: Raspberry Pi forwards these commands to the selected Arduino via serial communication.
-5. Dispensing Control (Arduino):
-  * Opens the dispenser lid
-  * Continuously monitors the load cell to measure dispensed food
-  * Stops dispensing once the target weight is reached
+ * Amount of food to dispense
+ * Scheduled time to feed
+6. Command Forwarding: Raspberry Pi forwards these commands to the selected Arduino via serial communication.
+7. Dispensing Control (Arduino):
+ * Opens the dispenser lid
+ * Continuously monitors the load cell to measure dispensed food
+ * Stops dispensing once the target weight is reached
 6. Bowl Lid Management:
-  * Bowl lid stays open for 20 minutes if the pet is present
-  * If the pet is detected during this period, the 20-minute timer resets
-  * Bowl lid closes once the pet leaves and timer expires
+ * Bowl lid stays open for 20 minutes if the pet is present
+ * If the pet is detected during this period, the 20-minute timer resets
+ * Bowl lid closes once the pet leaves and timer expires
 7. Data Feedback: Arduino sends current weight and dispensing status back to Raspberry Pi, which forwards the data to Firebase for monitoring.
 
 ---
