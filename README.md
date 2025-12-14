@@ -24,7 +24,7 @@ This project is designed for households with multiple pets (cat & dog) where foo
 2. Pet Selection: Based on the detected pet, the Pi selects the corresponding Arduino controlling that pet’s feeder.
 3. Feeding Schedule: The web app sends feeding parameters to the Pi:
   * Amount of food to dispense
-  * Scheduled time to feed
+ 	* Scheduled time to feed
 4. Command Forwarding: Raspberry Pi forwards these commands to the selected Arduino via serial communication.
 5. Dispensing Control (Arduino):
   * Opens the dispenser lid
