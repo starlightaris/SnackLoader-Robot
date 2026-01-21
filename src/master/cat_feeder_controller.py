@@ -7,14 +7,13 @@ from firebase_admin import credentials, db
 # --- CONFIG ---
 SERVICE_ACCOUNT = "/home/eutech/serviceAccountKey.json"
 RTDB_URL = "https://snackloader-default-rtdb.asia-southeast1.firebasedatabase.app/"
-
-PORT = "/dev/ttyUSB0"  # Change this to match the Cat Arduino's port
+PORT = "/dev/ttyUSB0" 
 BAUD = 9600
-POLL_INTERVAL = 0.5    # 0.5s is plenty for a 10-min timer logic
+POLL_INTERVAL = 0.5  # Slightly slower polling is better for FSM stability
 
 # --- FSM SETTINGS ---
-CONFIRMATION_TIME = 3    # Seconds cat must be present to open
-FEEDING_WINDOW = 600     # 10 minutes (600 seconds)
+CONFIRMATION_TIME = 3    # Seconds pet must be seen to open
+FEEDING_WINDOW = 600     # 10 minutes (in seconds) to stay open
 
 # --- INIT FIREBASE ---
 cred = credentials.Certificate(SERVICE_ACCOUNT)
@@ -24,6 +23,7 @@ firebase_admin.initialize_app(cred, {"databaseURL": RTDB_URL})
 try:
     ser = serial.Serial(PORT, BAUD, timeout=1)
     time.sleep(2)
+    print("Serial connected to Arduino.")
 except Exception as e:
     print("Serial open error:", e)
     ser = None
@@ -34,107 +34,140 @@ petfeeder_cat_ref = db.reference("petfeeder/cat/bowlWeight")
 det_ref = db.reference("detectionStatus")
 
 # --- GLOBAL STATE ---
-class CatSystem:
+class CatFSM:
     def __init__(self):
         self.state = "IDLE"           # IDLE, CONFIRMING, OPEN
-        self.lid_is_open = False
-        self.start_detect_ts = 0      # When did we first see the cat?
-        self.timeout_ts = 0           # When should the lid close?
+        self.lid_open = False
         self.is_dispensing = False
         self.last_run_state = False
+        
+        self.start_detect_ts = 0      # For the 3s check
+        self.timeout_ts = 0           # For the 10m check
 
-cat = CatSystem()
+cat_unit = CatFSM()
 
 # --- HELPERS ---
 def send_serial(cmd: str):
     if ser and ser.is_open:
         ser.write((cmd + "\n").encode())
-        print(f"[SEND] {cmd}")
+        print("[SEND]", cmd)
+    else:
+        print("[SEND-FAILED]", cmd)
 
+def set_status(status: str):
+    dispenser_cat_ref.update({"status": status})
+
+def stop_run_flag():
+    dispenser_cat_ref.update({"run": False})
+
+# --- SERIAL LISTENER ---
 def serial_listener():
     while True:
         if ser and ser.in_waiting > 0:
             try:
                 line = ser.readline().decode(errors="ignore").strip()
+                if not line: continue
+                print("[ARDUINO]", line)
+
                 if line.startswith("LIVE"):
-                    # Update weight to Firebase
-                    weight = line.split()[1]
-                    petfeeder_cat_ref.update({"weight": float(weight), "timestamp": int(time.time())})
+                    try:
+                        live_w = float(line.split()[1])
+                        petfeeder_cat_ref.update({
+                            "weight": live_w,
+                            "unit": "g",
+                            "timestamp": int(time.time())
+                        })
+                    except: pass
+
                 if line == "DONE":
-                    cat.is_dispensing = False
-                    dispenser_cat_ref.update({"status": "completed", "run": False})
-            except: pass
+                    cat_unit.is_dispensing = False
+                    set_status("completed")
+                    stop_run_flag()
+            except:
+                continue
         time.sleep(0.01)
 
-# --- FINITE STATE MACHINE LOGIC ---
-def update_fsm(is_detected):
-    now = time.time()
-
-    # STATE: IDLE (Lid Closed, looking for cat)
-    if cat.state == "IDLE":
-        if is_detected:
-            cat.state = "CONFIRMING"
-            cat.start_detect_ts = now
-            print("Cat spotted... confirming (3s)")
-
-    # STATE: CONFIRMING (Waiting for 3s of continuous presence)
-    elif cat.state == "CONFIRMING":
-        if not is_detected:
-            cat.state = "IDLE"
-            print("Cat left during confirmation. Resetting.")
-        elif (now - cat.start_detect_ts) >= CONFIRMATION_TIME:
-            print("Confirmation complete. Opening Lid.")
-            send_serial("OPEN_LID")
-            cat.lid_is_open = True
-            cat.state = "OPEN"
-            cat.timeout_ts = now + FEEDING_WINDOW
-
-    # STATE: OPEN (Lid stays open for 10 mins)
-    elif cat.state == "OPEN":
-        # RESET TIMER: If cat is seen, push the timeout forward
-        if is_detected:
-            cat.timeout_ts = now + FEEDING_WINDOW
-        
-        # CLOSE CONDITION: Timer expired AND cat is not currently there
-        if now > cat.timeout_ts:
-            if not is_detected:
-                print("10m Timeout & Cat gone. Closing Lid.")
-                send_serial("CLOSE_LID")
-                cat.lid_is_open = False
-                cat.state = "IDLE"
-            else:
-                # Cat is still there, extend by another minute or stay open
-                pass 
-
-def main_loop():
+# --- MAIN FSM & RTDB LOOP ---
+def rtdb_loop():
     while True:
-        # 1. Get Detection Status
-        det = det_ref.get() or {}
-        cat_present = bool(det.get("cat", {}).get("detected", False))
+        now = time.time()
         
-        # 2. Update the FSM
-        update_fsm(cat_present)
+        # 1. READ DETECTION STATES
+        det = det_ref.get() or {}
+        cat_detected = bool(det.get("cat", {}).get("detected", False))
+        dog_detected = bool(det.get("dog", {}).get("detected", False))
 
-        # 3. Handle Dispenser "Run" button from App
-        node = dispenser_cat_ref.get() or {}
-        run_val = bool(node.get("run", False))
-        if run_val and not cat.last_run_state:
-            amount = node.get("amount", 0)
-            if not cat.lid_is_open:
+        # 2. FINITE STATE MACHINE LOGIC
+        
+        # SAFETY RULE: If dog shows up at cat bowl, override everything and close
+        if dog_detected and cat_unit.lid_open:
+            print("!!! DOG DETECTED at Cat Bowl - Safety Close")
+            send_serial("CLOSE_LID")
+            cat_unit.lid_open = False
+            cat_unit.state = "IDLE"
+
+        # STATE: IDLE (Waiting for cat)
+        elif cat_unit.state == "IDLE":
+            if cat_detected:
+                cat_unit.state = "CONFIRMING"
+                cat_unit.start_detect_ts = now
+                print("Cat spotted... starting 3s confirmation.")
+
+        # STATE: CONFIRMING (Checking if cat stays for 3s)
+        elif cat_unit.state == "CONFIRMING":
+            if not cat_detected:
+                cat_unit.state = "IDLE"
+                print("Cat left. Confirmation reset.")
+            elif (now - cat_unit.start_detect_ts) >= CONFIRMATION_TIME:
+                print("Cat confirmed. Opening Lid.")
                 send_serial("OPEN_LID")
-                cat.lid_is_open = True
-                time.sleep(1) # Wait for stepper
-            send_serial(f"DISPENSE {amount}")
-            cat.is_dispensing = True
-        cat.last_run_state = run_val
+                cat_unit.lid_open = True
+                cat_unit.state = "OPEN"
+                cat_unit.timeout_ts = now + FEEDING_WINDOW
 
+        # STATE: OPEN (10-minute timer)
+        elif cat_unit.state == "OPEN":
+            # If cat is seen, reset/extend the 10-minute timer
+            if cat_detected:
+                cat_unit.timeout_ts = now + FEEDING_WINDOW
+            
+            # Close if 10m is up AND cat is no longer there
+            if now > cat_unit.timeout_ts and not cat_detected:
+                print("10m Feeding window expired. Closing Lid.")
+                send_serial("CLOSE_LID")
+                cat_unit.lid_open = False
+                cat_unit.state = "IDLE"
+
+        # 3. MANUAL FEED REQUESTS (from App)
+        node = dispenser_cat_ref.get() or {}
+        run = bool(node.get("run", False))
+        amount = float(node.get("amount", 0) or 0)
+
+        if run and not cat_unit.last_run_state:
+            print(f"FEED REQUEST RECEIVED: {amount}g")
+            set_status("starting")
+            
+            # Ensure lid is open for dispensing
+            if not cat_unit.lid_open:
+                send_serial("OPEN_LID")
+                cat_unit.lid_open = True
+                cat_unit.state = "OPEN" # Move to open state so timer starts
+                cat_unit.timeout_ts = now + FEEDING_WINDOW
+                time.sleep(1.0) 
+
+            send_serial(f"DISPENSE {amount}")
+            cat_unit.is_dispensing = True
+
+        cat_unit.last_run_state = run
         time.sleep(POLL_INTERVAL)
 
-# --- START ---
+# ----------------- START -----------------
 threading.Thread(target=serial_listener, daemon=True).start()
-print("Cat Unit FSM Started...")
+print("RTDB CAT FSM CONTROLLER STARTED")
+
 try:
-    main_loop()
+    rtdb_loop()
 except KeyboardInterrupt:
-    if cat.lid_is_open:
+    print("Exiting.")
+    if cat_unit.lid_open:
         send_serial("CLOSE_LID")
