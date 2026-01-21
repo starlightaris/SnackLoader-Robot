@@ -1,4 +1,4 @@
-# dispenser_controller.py
+# dispenser_controller_dog.py
 import serial
 import time
 import threading
@@ -39,6 +39,12 @@ last_cat_detected = False
 last_dog_detected = False
 # timestamp of last cat detection (epoch seconds)
 last_dog_ts = 0
+
+# --- NEW FSM STATE VARIABLES ---
+fsm_state = "IDLE"           # IDLE, CONFIRMING, OPEN
+start_detect_ts = 0          # Timer for the 3s check
+timeout_ts = 0               # Timer for the 10m window
+# -------------------------------
 
 # ----------------- FIREBASE REFERENCES -----------------
 dispenser_dog_ref = db.reference("dispenser/dog")
@@ -120,6 +126,7 @@ def serial_listener():
 def rtdb_loop():
     global last_run_state, is_dispensing, last_cat_detected, last_dog_detected
     global last_dog_ts, lid_open
+    global fsm_state, start_detect_ts, timeout_ts
 
     while True:
         # read detection states
@@ -130,22 +137,45 @@ def rtdb_loop():
         cat_detected = bool(cat_node.get("detected", False))
         dog_detected = bool(dog_node.get("detected", False))
 
-        # update timestamps if detected
-        if dog_detected:
-            last_dog_ts = int(time.time())
+        now = time.time()
 
-        # --- Lid logic based on detections (immediate rules) ---
+        # --- FSM LID LOGIC ---
+
+        # 1. IMMEDIATE CAT OVERRIDE (Safety for Dog Bowl)
         if cat_detected and lid_open and is_dispensing == False:
-            print("Cat detected -> immediate lid close")
+            print("Cat detected at Dog bowl -> immediate lid close")
             send_serial("CLOSE_LID")
             lid_open = False
+            fsm_state = "IDLE"
             
-        elif dog_detected:
-            # dog-only -> open lid 
-            if not lid_open:
-                print("Dog detected -> open lid")
+        # 2. DOG FSM
+        elif fsm_state == "IDLE":
+            if dog_detected:
+                fsm_state = "CONFIRMING"
+                start_detect_ts = now
+                print("Dog spotted... starting 3s confirmation.")
+        
+        elif fsm_state == "CONFIRMING":
+            if not dog_detected:
+                fsm_state = "IDLE"
+            elif (now - start_detect_ts) >= 3: # 3s Confirmation
+                print("Dog confirmed -> open lid")
                 send_serial("OPEN_LID")
                 lid_open = True
+                fsm_state = "OPEN"
+                timeout_ts = now + 600 # Set 10m timer
+        
+        elif fsm_state == "OPEN":
+            # If dog is detected, reset/extend the 10-minute timer
+            if dog_detected:
+                timeout_ts = now + 600
+            
+            # Close if 10m is up AND dog is not currently there
+            if now > timeout_ts and not dog_detected:
+                print("Dog timeout reached -> closing lid")
+                send_serial("CLOSE_LID")
+                lid_open = False
+                fsm_state = "IDLE"
 
         # --- Poll for frontend-run feed request ---
         node = dispenser_dog_ref.get() or {}
@@ -161,6 +191,8 @@ def rtdb_loop():
                 print("Opening lid before dispense")
                 send_serial("OPEN_LID")
                 lid_open = True
+                fsm_state = "OPEN" # Move to open state
+                timeout_ts = now + 600 # Start 10m timer
                 # give Arduino small time to move lid before dispensing
                 time.sleep(0.6)
             # send dispense command
