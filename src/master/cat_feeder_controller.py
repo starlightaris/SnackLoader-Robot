@@ -11,9 +11,7 @@ RTDB_URL = "https://snackloader-default-rtdb.asia-southeast1.firebasedatabase.ap
 
 PORT = "/dev/ttyUSB0" 
 BAUD = 9600
-
 POLL_INTERVAL = 0.2  # seconds
-
 
 # ----------------- INIT FIREBASE -----------------
 cred = credentials.Certificate(SERVICE_ACCOUNT)
@@ -32,18 +30,13 @@ print("RTDB CAT DISPENSER + LID CONTROLLER STARTED")
 # ----------------- STATE -----------------
 last_run_state = False
 is_dispensing = False
-last_weight = 0.0
-
 lid_open = False
-last_cat_detected = False
-last_dog_detected = False
-last_cat_ts = 0
 
-# --- NEW FSM STATE VARIABLES ---
+# FSM & Timing State
 fsm_state = "IDLE"           # IDLE, CONFIRMING, OPEN
-start_detect_ts = 0          # Timer for the 5s check
-timeout_ts = 0               # Timer for the 10m window
-# -------------------------------
+start_detect_ts = 0          # Timer for the 5s confirmation
+timeout_ts = 0               # Timer for the 10m feeding window
+last_owner_seen_ts = 0       # Tracks exactly when the CAT was last seen
 
 # ----------------- FIREBASE REFERENCES -----------------
 dispenser_cat_ref = db.reference("dispenser/cat")
@@ -78,49 +71,40 @@ def serial_listener():
         if ser and ser.in_waiting > 0:
             try:
                 line = ser.readline().decode(errors="ignore").strip()
+                if not line: continue
+                print("[ARDUINO]", line)
+
+                if line.startswith("LIVE"):
+                    try:
+                        live_weight = float(line.split()[1])
+                        petfeeder_cat_ref.update({
+                            "weight": live_weight,
+                            "unit": "g",
+                            "timestamp": int(time.time())
+                        })
+                    except: pass
+
+                if line.startswith("WEIGHT"):
+                    try:
+                        final_w = float(line.split()[1])
+                        update_final_weight(final_w)
+                    except: pass
+
+                if line == "DONE":
+                    is_dispensing = False
+                    set_status("completed")
+                    stop_run_flag()
             except:
                 continue
-            if not line:
-                continue
-            print("[ARDUINO]", line)
-
-            if line.startswith("LIVE"):
-                try:
-                    live_weight = float(line.split()[1])
-                    petfeeder_cat_ref.update({
-                        "weight": live_weight,
-                        "unit": "g",
-                        "timestamp": int(time.time())
-                    })
-                except Exception as e:
-                    print("LIVE parse error:", e)
-
-            if line.startswith("WEIGHT"):
-                try:
-                    final_w = float(line.split()[1])
-                    update_final_weight(final_w)
-                except:
-                    pass
-
-            if line == "OPEN_LID" or line == "LID_OPENED":
-                print("LID opened (arduino reported).")
-            if line == "CLOSE_LID" or line == "LID_CLOSED":
-                print("LID closed (arduino reported).")
-
-            if line == "DONE":
-                is_dispensing = False
-                set_status("completed")
-                stop_run_flag()
-
         time.sleep(0.01)
 
 # ----------------- MAIN RTDB POLL LOOP -----------------
 def rtdb_loop():
-    global last_run_state, is_dispensing, last_cat_detected, last_dog_detected
-    global last_cat_ts, lid_open
-    global fsm_state, start_detect_ts, timeout_ts
+    global last_run_state, is_dispensing, lid_open
+    global fsm_state, start_detect_ts, timeout_ts, last_owner_seen_ts
 
     while True:
+        # read detection states
         det = det_ref.get() or {}
         cat_node = det.get("cat", {}) or {}
         dog_node = det.get("dog", {}) or {}
@@ -130,44 +114,50 @@ def rtdb_loop():
 
         now = time.time()
 
-        # --- FSM LID LOGIC ---
+        # Update Cat presence timestamp
+        if cat_detected:
+            last_owner_seen_ts = now
 
-        # 1. DOG OVERRIDE: Close in 2 sec if dog detected at Cat bowl
-        if dog_detected and lid_open and is_dispensing == False:
-            print("!!! Dog detected at Cat bowl: Closing in 2 seconds...")
-            time.sleep(2) 
-            send_serial("CLOSE_LID")
-            lid_open = False
-            fsm_state = "IDLE"
-            
-        # 2. CAT FSM
-        elif fsm_state == "IDLE":
-            if cat_detected:
-                fsm_state = "CONFIRMING"
-                start_detect_ts = now
-                print("Cat spotted... starting 5s confirmation.")
-        
-        elif fsm_state == "CONFIRMING":
-            if not cat_detected:
-                fsm_state = "IDLE"
-            elif (now - start_detect_ts) >= 5: # Updated to 5s Delay
-                print("Cat confirmed (5s) -> open lid")
-                send_serial("OPEN_LID")
-                lid_open = True
-                fsm_state = "OPEN"
-                timeout_ts = now + 600 
-        
-        elif fsm_state == "OPEN":
-            if cat_detected:
-                timeout_ts = now + 600
-            
-            if now > timeout_ts and not cat_detected:
-                print("Cat timeout reached -> closing lid")
+        # --- SMART OVERRIDE LOGIC ---
+        # If Dog is here and Lid is open, but Cat hasn't been seen for 5 seconds
+        if dog_detected and lid_open and not is_dispensing:
+            if (now - last_owner_seen_ts) > 5:
+                print("!!! Dog detected AND Cat is missing > 5s. Closing in 2s...")
+                time.sleep(2) 
                 send_serial("CLOSE_LID")
                 lid_open = False
                 fsm_state = "IDLE"
 
-        # --- Poll for frontend-run feed request ---
+        # --- CAT FINITE STATE MACHINE ---
+        if fsm_state == "IDLE":
+            if cat_detected:
+                fsm_state = "CONFIRMING"
+                start_detect_ts = now
+                print("Cat spotted... checking 5s confirmation.")
+
+        elif fsm_state == "CONFIRMING":
+            if not cat_detected:
+                fsm_state = "IDLE"
+            elif (now - start_detect_ts) >= 5:
+                print("Cat confirmed (5s) -> open lid")
+                send_serial("OPEN_LID")
+                lid_open = True
+                fsm_state = "OPEN"
+                timeout_ts = now + 600 # 10 minute window
+
+        elif fsm_state == "OPEN":
+            # Extend 10m timer if cat is seen
+            if cat_detected:
+                timeout_ts = now + 600
+            
+            # Auto-close if timeout reached and cat is gone
+            if now > timeout_ts and not cat_detected:
+                print("Feeding window expired. Closing lid.")
+                send_serial("CLOSE_LID")
+                lid_open = False
+                fsm_state = "IDLE"
+
+        # --- MANUAL FEED REQUEST ---
         node = dispenser_cat_ref.get() or {}
         run = bool(node.get("run", False))
         amount = float(node.get("amount", 0) or 0)
@@ -179,7 +169,7 @@ def rtdb_loop():
                 send_serial("OPEN_LID")
                 lid_open = True
                 fsm_state = "OPEN"
-                timeout_ts = now + 600 
+                timeout_ts = now + 600
                 time.sleep(0.6)
             send_serial(f"DISPENSE {amount}")
             is_dispensing = True
@@ -187,13 +177,10 @@ def rtdb_loop():
         last_run_state = run
         time.sleep(POLL_INTERVAL)
 
-# ----------------- START THREADS -----------------
+# ----------------- EXECUTION -----------------
 threading.Thread(target=serial_listener, daemon=True).start()
-threading.Thread(target=rtdb_loop, daemon=True).start()
-
 try:
-    while True:
-        time.sleep(1)
+    rtdb_loop()
 except KeyboardInterrupt:
     print("Exiting.")
     if lid_open:
