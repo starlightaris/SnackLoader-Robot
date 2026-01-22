@@ -143,12 +143,12 @@ def rtdb_loop():
                 send_serial("OPEN_LID")
                 lid_open = True
                 fsm_state = "OPEN"
-                timeout_ts = now + 180 # 3 minute window
+                timeout_ts = now + 600 # 10 minute window
 
         elif fsm_state == "OPEN":
             # Extend 10m timer if cat is seen
             if cat_detected:
-                timeout_ts = now + 180
+                timeout_ts = now + 600
             
             # Auto-close if timeout reached and cat is gone
             if now > timeout_ts and not cat_detected:
@@ -169,7 +169,7 @@ def rtdb_loop():
                 send_serial("OPEN_LID")
                 lid_open = True
                 fsm_state = "OPEN"
-                timeout_ts = now + 180
+                timeout_ts = now + 600
                 time.sleep(0.6)
             send_serial(f"DISPENSE {amount}")
             is_dispensing = True
